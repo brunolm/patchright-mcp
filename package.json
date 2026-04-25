@@ -1,12 +1,12 @@
 {
-  "name": "@playwright/mcp",
+  "name": "patchright-mcp",
   "version": "0.0.70",
-  "description": "Playwright Tools for MCP",
+  "description": "Patchright (undetected Playwright) Tools for MCP",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/microsoft/playwright-mcp.git"
   },
-  "homepage": "https://playwright.dev",
+  "homepage": "https://github.com/Kaliiiiiiiiii-Vinyzu/patchright",
   "engines": {
     "node": ">=18"
   },
@@ -24,9 +24,9 @@
     "dtest": "MCP_IN_DOCKER=1 playwright test --project=chromium-docker",
     "build": "echo OK",
     "npm-publish": "npm run lint && npm run test && npm publish",
-    "docker-build": "docker build --no-cache -t playwright-mcp-dev:latest .",
-    "docker-rm": "docker rm playwright-mcp-dev",
-    "docker-run": "docker run -it -p 8080:8080 --name playwright-mcp-dev playwright-mcp-dev:latest",
+    "docker-build": "docker build --no-cache -t patchright-mcp-dev:latest .",
+    "docker-rm": "docker rm patchright-mcp-dev",
+    "docker-run": "docker run -it -p 8080:8080 --name patchright-mcp-dev patchright-mcp-dev:latest",
     "roll": "node roll.js"
   },
   "exports": {
@@ -37,15 +37,15 @@
     }
   },
   "dependencies": {
-    "playwright": "1.60.0-alpha-1776382637000",
-    "playwright-core": "1.60.0-alpha-1776382637000"
+    "patchright": "1.59.4",
+    "patchright-core": "1.59.4"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.25.2",
-    "@playwright/test": "1.60.0-alpha-1776382637000",
+    "@playwright/test": "1.59.0",
     "@types/node": "^24.3.0"
   },
   "bin": {
-    "playwright-mcp": "cli.js"
+    "patchright-mcp": "cli.js"
   }
 }

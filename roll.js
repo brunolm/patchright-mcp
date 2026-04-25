@@ -3,23 +3,27 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 function copyConfig() {
-  const src = path.join(__dirname, '..', 'playwright', 'packages', 'playwright-core', 'src', 'tools', 'mcp', 'config.d.ts');
+  const src = path.join(__dirname, 'node_modules', 'patchright-core', 'lib', 'tools', 'mcp', 'config.d.ts');
   const dst = path.join(__dirname, 'config.d.ts');
   let content = fs.readFileSync(src, 'utf-8');
   content = content.replace(
     "import type * as playwright from 'playwright-core';",
-    "import type * as playwright from 'playwright';"
+    "import type * as playwright from 'patchright';"
+  );
+  content = content.replace(
+    "import type * as playwright from 'playwright';",
+    "import type * as playwright from 'patchright';"
   );
   fs.writeFileSync(dst, content);
   console.log(`Copied config.d.ts from ${src} to ${dst}`);
 }
 
-function updatePlaywrightVersion(version) {
+function updatePatchrightVersion(version) {
   const file = path.join(__dirname, 'package.json');
   const json = JSON.parse(fs.readFileSync(file, 'utf-8'));
   let updated = false;
   for (const section of ['dependencies', 'devDependencies']) {
-    for (const pkg of ['@playwright/test', 'playwright', 'playwright-core']) {
+    for (const pkg of ['patchright', 'patchright-core']) {
       if (json[section]?.[pkg]) {
         json[section][pkg] = version;
         updated = true;
@@ -35,7 +39,7 @@ function updatePlaywrightVersion(version) {
 }
 
 function doRoll(version) {
-  updatePlaywrightVersion(version);
+  updatePatchrightVersion(version);
   copyConfig();
   // update readme
   execSync('npm run lint', { cwd: __dirname, stdio: 'inherit' });
@@ -43,7 +47,7 @@ function doRoll(version) {
 
 let version = process.argv[2];
 if (!version) {
-  version = execSync('npm info playwright@next version', { encoding: 'utf-8' }).trim();
-  console.log(`Using next playwright version: ${version}`);
+  version = execSync('npm info patchright version', { encoding: 'utf-8' }).trim();
+  console.log(`Using latest patchright version: ${version}`);
 }
 doRoll(version);

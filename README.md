@@ -1,6 +1,8 @@
-## Playwright MCP
+## Patchright MCP
 
-A Model Context Protocol (MCP) server that provides browser automation capabilities using [Playwright](https://playwright.dev). This server enables LLMs to interact with web pages through structured accessibility snapshots, bypassing the need for screenshots or visually-tuned models.
+A Model Context Protocol (MCP) server that provides **undetected** browser automation capabilities using [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright) - a patched, undetected fork of Playwright. This server enables LLMs to interact with web pages through structured accessibility snapshots, bypassing the need for screenshots or visually-tuned models.
+
+> **Note**: This is a fork of [Playwright MCP](https://github.com/microsoft/playwright-mcp) that swaps Playwright for Patchright as the underlying browser engine. Patchright only patches Chromium-based browsers; Firefox and WebKit are not stealth-patched.
 
 ### Playwright MCP vs Playwright CLI
 
@@ -37,7 +39,7 @@ First, install the Playwright MCP server with your client.
     "playwright": {
       "command": "npx",
       "args": [
-        "@playwright/mcp@latest"
+        "patchright-mcp@latest"
       ]
     }
   }
@@ -56,7 +58,7 @@ Add via the Amp VS Code extension settings screen or by updating your settings.j
   "playwright": {
     "command": "npx",
     "args": [
-      "@playwright/mcp@latest"
+      "patchright-mcp@latest"
     ]
   }
 }
@@ -67,7 +69,7 @@ Add via the Amp VS Code extension settings screen or by updating your settings.j
 Add via the `amp mcp add`command below
 
 ```bash
-amp mcp add playwright -- npx @playwright/mcp@latest
+amp mcp add playwright -- npx patchright-mcp@latest
 ```
 
 </details>
@@ -83,7 +85,7 @@ Add via the Antigravity settings or by updating your configuration file:
     "playwright": {
       "command": "npx",
       "args": [
-        "@playwright/mcp@latest"
+        "patchright-mcp@latest"
       ]
     }
   }
@@ -98,7 +100,7 @@ Add via the Antigravity settings or by updating your configuration file:
 Use the Claude Code CLI to add the Playwright MCP server:
 
 ```bash
-claude mcp add playwright npx @playwright/mcp@latest
+claude mcp add playwright npx patchright-mcp@latest
 ```
 </details>
 
@@ -127,7 +129,7 @@ Add the following to your [`cline_mcp_settings.json`](https://docs.cline.bot/mcp
       "timeout": 30,
       "args": [
         "-y",
-        "@playwright/mcp@latest"
+        "patchright-mcp@latest"
       ],
       "disabled": false
     }
@@ -143,7 +145,7 @@ Add the following to your [`cline_mcp_settings.json`](https://docs.cline.bot/mcp
 Use the Codex CLI to add the Playwright MCP server:
 
 ```bash
-codex mcp add playwright npx "@playwright/mcp@latest"
+codex mcp add playwright npx "patchright-mcp@latest"
 ```
 
 Alternatively, create or edit the configuration file `~/.codex/config.toml` and add:
@@ -151,7 +153,7 @@ Alternatively, create or edit the configuration file `~/.codex/config.toml` and 
 ```toml
 [mcp_servers.playwright]
 command = "npx"
-args = ["@playwright/mcp@latest"]
+args = ["patchright-mcp@latest"]
 ```
 
 For more information, see the [Codex MCP documentation](https://github.com/openai/codex/blob/main/codex-rs/config.md#mcp_servers).
@@ -179,7 +181,7 @@ Alternatively, create or edit the configuration file `~/.copilot/mcp-config.json
         "*"
       ],
       "args": [
-        "@playwright/mcp@latest"
+        "patchright-mcp@latest"
       ]
     }
   }
@@ -199,7 +201,7 @@ For more information, see the [Copilot CLI documentation](https://docs.github.co
 
 #### Or install manually:
 
-Go to `Cursor Settings` -> `MCP` -> `Add new MCP Server`. Name to your liking, use `command` type with the command `npx @playwright/mcp@latest`. You can also verify config or add command like arguments via clicking `Edit`.
+Go to `Cursor Settings` -> `MCP` -> `Add new MCP Server`. Name to your liking, use `command` type with the command `npx patchright-mcp@latest`. You can also verify config or add command like arguments via clicking `Edit`.
 
 </details>
 
@@ -209,7 +211,7 @@ Go to `Cursor Settings` -> `MCP` -> `Add new MCP Server`. Name to your liking, u
 Use the Factory CLI to add the Playwright MCP server:
 
 ```bash
-droid mcp add playwright "npx @playwright/mcp@latest"
+droid mcp add playwright "npx patchright-mcp@latest"
 ```
 
 Alternatively, type `/mcp` within Factory droid to open an interactive UI for managing MCP servers.
@@ -255,7 +257,7 @@ Alternatively, add to `.junie/mcp/mcp.json`:
       "command": "npx",
       "args": [
         "-y",
-        "@playwright/mcp@latest"
+        "patchright-mcp@latest"
       ]
     }
   }
@@ -279,7 +281,7 @@ Follow the MCP Servers [documentation](https://kiro.dev/docs/mcp/). For example 
     "playwright": {
       "command": "npx",
       "args": [
-        "@playwright/mcp@latest"
+        "patchright-mcp@latest"
       ]
     }
   }
@@ -312,7 +314,7 @@ Follow the MCP Servers [documentation](https://opencode.ai/docs/mcp-servers/). F
       "type": "local",
       "command": [
         "npx",
-        "@playwright/mcp@latest"
+        "patchright-mcp@latest"
       ],
       "enabled": true
     }
@@ -343,7 +345,7 @@ Follow the MCP install [guide](https://code.visualstudio.com/docs/copilot/chat/m
 
 ```bash
 # For VS Code
-code --add-mcp '{"name":"playwright","command":"npx","args":["@playwright/mcp@latest"]}'
+code --add-mcp '{"name":"playwright","command":"npx","args":["patchright-mcp@latest"]}'
 ```
 
 After installation, the Playwright MCP server will be available for use with your GitHub Copilot agent in VS Code.
@@ -361,7 +363,7 @@ Alternatively, use the slash command `/add-mcp` in the Warp prompt and paste the
     "playwright": {
       "command": "npx",
       "args": [
-        "@playwright/mcp@latest"
+        "patchright-mcp@latest"
       ]
     }
   }
@@ -400,7 +402,7 @@ Playwright MCP server supports following arguments. They can be provided in the 
 | --console-level <level> | level of console messages to return: "error", "warning", "info", "debug". Each level includes the messages of more severe levels.<br>*env* `PLAYWRIGHT_MCP_CONSOLE_LEVEL` |
 | --device <device> | device to emulate, for example: "iPhone 15"<br>*env* `PLAYWRIGHT_MCP_DEVICE` |
 | --executable-path <path> | path to the browser executable.<br>*env* `PLAYWRIGHT_MCP_EXECUTABLE_PATH` |
-| --extension | Connect to a running browser instance (Edge/Chrome only). Requires the "Playwright Extension" to be installed.<br>*env* `PLAYWRIGHT_MCP_EXTENSION` |
+| --extension | Connect to a running browser instance (Edge/Chrome only). Requires the "Playwright MCP Bridge" browser extension to be installed.<br>*env* `PLAYWRIGHT_MCP_EXTENSION` |
 | --endpoint <endpoint> | Bound browser endpoint to connect to.<br>*env* `PLAYWRIGHT_MCP_ENDPOINT` |
 | --grant-permissions <permissions...> | List of permissions to grant to the browser context, for example "geolocation", "clipboard-read", "clipboard-write".<br>*env* `PLAYWRIGHT_MCP_GRANT_PERMISSIONS` |
 | --headless | run browser in headless mode, headed by default<br>*env* `PLAYWRIGHT_MCP_HEADLESS` |
@@ -466,7 +468,7 @@ state [here](https://playwright.dev/docs/auth).
     "playwright": {
       "command": "npx",
       "args": [
-        "@playwright/mcp@latest",
+        "patchright-mcp@latest",
         "--isolated",
         "--storage-state={path/to/storage.json}"
       ]
@@ -514,7 +516,7 @@ The Playwright MCP server can be configured using a JSON configuration file. You
 using the `--config` command line option:
 
 ```bash
-npx @playwright/mcp@latest --config path/to/config.json
+npx patchright-mcp@latest --config path/to/config.json
 ```
 
 <details>
@@ -733,7 +735,7 @@ When running headed browser on system w/o display or from worker processes of th
 run the MCP server from environment with the DISPLAY and pass the `--port` flag to enable HTTP transport.
 
 ```bash
-npx @playwright/mcp@latest --port 8931
+npx patchright-mcp@latest --port 8931
 ```
 
 And then in MCP client config, set the `url` to the HTTP endpoint:
@@ -794,7 +796,7 @@ docker build -t mcr.microsoft.com/playwright/mcp .
 ```js
 import http from 'http';
 
-import { createConnection } from '@playwright/mcp';
+import { createConnection } from 'patchright-mcp';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 
 http.createServer(async (req, res) => {
@@ -824,7 +826,8 @@ http.createServer(async (req, res) => {
   - Description: Perform click on a web page
   - Parameters:
     - `element` (string, optional): Human-readable element description used to obtain permission to interact with the element
-    - `target` (string): Exact target element reference from the page snapshot, or a unique element selector
+    - `ref` (string): Exact target element reference from the page snapshot
+    - `selector` (string, optional): CSS or role selector for the target element, when "ref" is not available
     - `doubleClick` (boolean, optional): Whether to perform a double click instead of a single click
     - `button` (string, optional): Button to click, defaults to left
     - `modifiers` (array, optional): Modifier keys to press
@@ -855,10 +858,12 @@ http.createServer(async (req, res) => {
   - Title: Drag mouse
   - Description: Perform drag and drop between two elements
   - Parameters:
-    - `startElement` (string, optional): Human-readable source element description used to obtain the permission to interact with the element
-    - `startTarget` (string): Exact target element reference from the page snapshot, or a unique element selector
-    - `endElement` (string, optional): Human-readable target element description used to obtain the permission to interact with the element
-    - `endTarget` (string): Exact target element reference from the page snapshot, or a unique element selector
+    - `startElement` (string): Human-readable source element description used to obtain the permission to interact with the element
+    - `startRef` (string): Exact source element reference from the page snapshot
+    - `startSelector` (string, optional): CSS or role selector for the source element, when ref is not available
+    - `endElement` (string): Human-readable target element description used to obtain the permission to interact with the element
+    - `endRef` (string): Exact target element reference from the page snapshot
+    - `endSelector` (string, optional): CSS or role selector for the target element, when ref is not available
   - Read-only: **false**
 
 <!-- NOTE: This has been generated via update-readme.js -->
@@ -867,9 +872,10 @@ http.createServer(async (req, res) => {
   - Title: Evaluate JavaScript
   - Description: Evaluate JavaScript expression on page or element
   - Parameters:
-    - `element` (string, optional): Human-readable element description used to obtain permission to interact with the element
-    - `target` (string, optional): Exact target element reference from the page snapshot, or a unique element selector
     - `function` (string): () => { /* code */ } or (element) => { /* code */ } when element is provided
+    - `element` (string, optional): Human-readable element description used to obtain permission to interact with the element
+    - `ref` (string, optional): Exact target element reference from the page snapshot
+    - `selector` (string, optional): CSS or role selector for the target element, when "ref" is not available.
     - `filename` (string, optional): Filename to save the result to. If not provided, result is returned as text.
   - Read-only: **false**
 
@@ -908,7 +914,8 @@ http.createServer(async (req, res) => {
   - Description: Hover over element on page
   - Parameters:
     - `element` (string, optional): Human-readable element description used to obtain permission to interact with the element
-    - `target` (string): Exact target element reference from the page snapshot, or a unique element selector
+    - `ref` (string): Exact target element reference from the page snapshot
+    - `selector` (string, optional): CSS or role selector for the target element, when "ref" is not available
   - Read-only: **false**
 
 <!-- NOTE: This has been generated via update-readme.js -->
@@ -977,7 +984,8 @@ http.createServer(async (req, res) => {
   - Description: Select an option in a dropdown
   - Parameters:
     - `element` (string, optional): Human-readable element description used to obtain permission to interact with the element
-    - `target` (string): Exact target element reference from the page snapshot, or a unique element selector
+    - `ref` (string): Exact target element reference from the page snapshot
+    - `selector` (string, optional): CSS or role selector for the target element, when "ref" is not available
     - `values` (array): Array of values to select in the dropdown. This can be a single value or multiple values.
   - Read-only: **false**
 
@@ -987,8 +995,8 @@ http.createServer(async (req, res) => {
   - Title: Page snapshot
   - Description: Capture accessibility snapshot of the current page, this is better than screenshot
   - Parameters:
-    - `target` (string, optional): Exact target element reference from the page snapshot, or a unique element selector
     - `filename` (string, optional): Save snapshot to markdown file instead of returning it in the response.
+    - `selector` (string, optional): Element selector of the root element to capture a partial snapshot instead of the whole page
     - `depth` (number, optional): Limit the depth of the snapshot tree
   - Read-only: **true**
 
@@ -998,10 +1006,11 @@ http.createServer(async (req, res) => {
   - Title: Take a screenshot
   - Description: Take a screenshot of the current page. You can't perform actions based on the screenshot, use browser_snapshot for actions.
   - Parameters:
-    - `element` (string, optional): Human-readable element description used to obtain permission to interact with the element
-    - `target` (string, optional): Exact target element reference from the page snapshot, or a unique element selector
     - `type` (string): Image format for the screenshot. Default is png.
     - `filename` (string, optional): File name to save the screenshot to. Defaults to `page-{timestamp}.{png|jpeg}` if not specified. Prefer relative file names to stay within the output directory.
+    - `element` (string, optional): Human-readable element description used to obtain permission to screenshot the element. If not provided, the screenshot will be taken of viewport. If element is provided, ref must be provided too.
+    - `ref` (string, optional): Exact target element reference from the page snapshot. If not provided, the screenshot will be taken of viewport. If ref is provided, element must be provided too.
+    - `selector` (string, optional): CSS or role selector for the target element, when "ref" is not available.
     - `fullPage` (boolean, optional): When true, takes a screenshot of the full scrollable page, instead of the currently visible viewport. Cannot be used with element screenshots.
   - Read-only: **true**
 
@@ -1012,7 +1021,8 @@ http.createServer(async (req, res) => {
   - Description: Type text into editable element
   - Parameters:
     - `element` (string, optional): Human-readable element description used to obtain permission to interact with the element
-    - `target` (string): Exact target element reference from the page snapshot, or a unique element selector
+    - `ref` (string): Exact target element reference from the page snapshot
+    - `selector` (string, optional): CSS or role selector for the target element, when "ref" is not available
     - `text` (string): Text to type into the element
     - `submit` (boolean, optional): Whether to submit entered text (press Enter after)
     - `slowly` (boolean, optional): Whether to type one character at a time. Useful for triggering key handlers in the page. By default entire text is filled in at once.
@@ -1042,7 +1052,6 @@ http.createServer(async (req, res) => {
   - Parameters:
     - `action` (string): Operation to perform
     - `index` (number, optional): Tab index, used for close/select. If omitted for close, current tab is closed.
-    - `url` (string, optional): URL to navigate to in the new tab, used for new.
   - Read-only: **false**
 
 </details>
@@ -1278,35 +1287,6 @@ http.createServer(async (req, res) => {
 
 <!-- NOTE: This has been generated via update-readme.js -->
 
-- **browser_hide_highlight**
-  - Title: Hide element highlight
-  - Description: Remove a highlight overlay previously added for the element.
-  - Parameters:
-    - `element` (string, optional): Human-readable element description used when adding the highlight; must match the value passed to browser_highlight.
-    - `target` (string, optional): Exact target element reference from the page snapshot, or a unique element selector
-  - Read-only: **true**
-
-<!-- NOTE: This has been generated via update-readme.js -->
-
-- **browser_highlight**
-  - Title: Highlight element
-  - Description: Show a persistent highlight overlay around the element on the page.
-  - Parameters:
-    - `element` (string, optional): Human-readable element description used to obtain permission to interact with the element
-    - `target` (string): Exact target element reference from the page snapshot, or a unique element selector
-    - `style` (string, optional): Additional inline CSS applied to the highlight overlay, e.g. "outline: 2px dashed red".
-  - Read-only: **true**
-
-<!-- NOTE: This has been generated via update-readme.js -->
-
-- **browser_pick_locator**
-  - Title: Pick element locator
-  - Description: Wait for the user to pick an element in the browser and return its ref and locator.
-  - Parameters: None
-  - Read-only: **true**
-
-<!-- NOTE: This has been generated via update-readme.js -->
-
 - **browser_resume**
   - Title: Resume paused script execution
   - Description: Resume script execution after it was paused. When called with step set to true, execution will pause again before the next action.
@@ -1454,7 +1434,8 @@ http.createServer(async (req, res) => {
   - Description: Generate locator for the given element to use in tests
   - Parameters:
     - `element` (string, optional): Human-readable element description used to obtain permission to interact with the element
-    - `target` (string): Exact target element reference from the page snapshot, or a unique element selector
+    - `ref` (string): Exact target element reference from the page snapshot
+    - `selector` (string, optional): CSS or role selector for the target element, when "ref" is not available
   - Read-only: **true**
 
 <!-- NOTE: This has been generated via update-readme.js -->
@@ -1474,7 +1455,8 @@ http.createServer(async (req, res) => {
   - Description: Verify list is visible on the page
   - Parameters:
     - `element` (string): Human-readable list description
-    - `target` (string): Exact target element reference that points to the list
+    - `ref` (string): Exact target element reference that points to the list
+    - `selector` (string, optional): CSS or role selector for the target list, when "ref" is not available.
     - `items` (array): Items to verify
   - Read-only: **false**
 
@@ -1495,7 +1477,8 @@ http.createServer(async (req, res) => {
   - Parameters:
     - `type` (string): Type of the element
     - `element` (string): Human-readable element description
-    - `target` (string): Exact target element reference from the page snapshot
+    - `ref` (string): Exact target element reference from the page snapshot
+    - `selector` (string, optional): CSS or role selector for the target element, when "ref" is not available
     - `value` (string): Value to verify. For checkbox, use "true" or "false".
   - Read-only: **false**
 

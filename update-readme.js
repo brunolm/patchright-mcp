@@ -20,7 +20,8 @@ const fs = require('fs')
 const path = require('path')
 const { execSync } = require('child_process');
 
-const { tools } = require('playwright-core/lib/coreBundle');
+const { browserTools } = require('patchright-core/lib/tools/exports');
+const tools = { browserTools };
 
 const capabilities = /** @type {Record<string, string>} */ ({
   'core-navigation': 'Core automation',

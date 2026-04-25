@@ -15,5 +15,5 @@
  * limitations under the License.
  */
 
-const { tools } = require('playwright-core/lib/coreBundle');
-module.exports = { createConnection: tools.createConnection };
+const { createConnection } = require('patchright-core/lib/tools/exports');
+module.exports = { createConnection };
