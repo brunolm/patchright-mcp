@@ -22,6 +22,9 @@ module.exports = {
   // Total time (ms) we wait for Chrome to expose CDP after spawning it.
   chromeStartupTimeoutMs: 30000,
 
+  // Total time (ms) we wait for the CDP endpoint to go away after closing Chrome.
+  chromeShutdownTimeoutMs: 10000,
+
   // Default browser launch options. `headless` is mutated at runtime by the
   // browser_set_headless tool. `args` is the list of command-line flags
   // appended to every Chrome launch.

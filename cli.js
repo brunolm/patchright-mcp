@@ -17,7 +17,8 @@
 
 const http = require("http");
 const { spawn } = require("child_process");
-const { program } = require("patchright-core/lib/utilsBundle");
+const { program, z } = require("patchright-core/lib/utilsBundle");
+const { tools, libCli } = require("patchright-core/lib/coreBundle");
 const config = require("./config");
 
 function takeFlag(argv, name) {
@@ -134,12 +135,18 @@ async function shutdownBrowser(browserContext) {
     if (browser) await browser.close();
     else if (browserContext) await browserContext.close();
   } catch {}
+  await waitForCdpShutdown(new URL(cdpEndpoint));
 }
 
-function setupBrowserQuitTool() {
-  require("patchright-core/lib/tools/exports");
-  const { z } = require("patchright-core/lib/zodBundle");
+// Chrome keeps answering /json/version for a moment after Browser.close; a
+// connect in that window attaches to the dying browser instead of relaunching.
+async function waitForCdpShutdown(url) {
+  const deadline = Date.now() + config.chromeShutdownTimeoutMs;
+  while (Date.now() < deadline && (await isCdpAlive(url)))
+    await new Promise((r) => setTimeout(r, 250));
+}
 
+function setupCustomTools() {
   const browserQuitTool = {
     capability: "core",
     schema: {
@@ -151,7 +158,7 @@ function setupBrowserQuitTool() {
       type: "action",
     },
     handle: async (context, params, response) => {
-      await shutdownBrowser(context._rawBrowserContext);
+      await shutdownBrowser(context._defaultBrowserContext);
       response.addTextResult("Browser closed.");
       response.addCode(
         "await session.send('Browser.close'); await browser.close();",
@@ -174,7 +181,7 @@ function setupBrowserQuitTool() {
     },
     handle: async (context, params, response) => {
       launchOptions.headless = !!params.enabled;
-      await shutdownBrowser(context._rawBrowserContext);
+      await shutdownBrowser(context._defaultBrowserContext);
       response.addTextResult(
         `Headless mode set to ${launchOptions.headless}. Next browser_* call will launch a fresh Chrome.`,
       );
@@ -183,110 +190,29 @@ function setupBrowserQuitTool() {
     },
   };
 
-  const cacheKey = Object.keys(require.cache).find((k) =>
-    /[\\/]tools[\\/]backend[\\/]tools\.js$/.test(k),
-  );
-  if (!cacheKey) {
-    console.error(
-      "[patchright-mcp] Could not locate tools.js in require cache; skipping custom tools",
-    );
-    return;
-  }
-  const mod = require.cache[cacheKey];
-  const originalExports = mod.exports;
-  const originalFilteredTools = originalExports.filteredTools;
-  mod.exports = new Proxy(originalExports, {
-    get(target, prop, receiver) {
-      if (prop === "filteredTools")
-        return (config) => [
-          ...originalFilteredTools(config),
-          browserQuitTool,
-          browserSetHeadlessTool,
-        ];
-      return Reflect.get(target, prop, receiver);
-    },
-  });
-}
-
-function setupSelfHealingBackend() {
-  const { BrowserBackend } = require("patchright-core/lib/tools/exports");
-  const playwright = require("patchright-core");
-
-  const isClosureError = (text) =>
-    /(?:browser|context|page|target).*has been closed/i.test(text || "");
-
-  const originalInit = BrowserBackend.prototype.initialize;
-  BrowserBackend.prototype.initialize = async function (clientInfo) {
-    this._clientInfo = clientInfo;
-    return originalInit.call(this, clientInfo);
-  };
-
-  const originalCallTool = BrowserBackend.prototype.callTool;
-  BrowserBackend.prototype.callTool = async function (
-    name,
-    rawArguments,
-    progress,
-  ) {
-    const result = await originalCallTool.call(
-      this,
-      name,
-      rawArguments,
-      progress,
-    );
-    if (!result?.isError || !isClosureError(result.content?.[0]?.text))
-      return result;
-
-    const cdpEndpoint = this._config?.browser?.cdpEndpoint;
-    if (!cdpEndpoint) return result;
-
-    console.error(
-      "[patchright-mcp] Detected closed browser; reconnecting and retrying tool call",
-    );
-    try {
-      const ContextClass = this._context?.constructor;
-      await this._context?.dispose().catch(() => {});
-      const browser = await playwright.chromium.connectOverCDP(cdpEndpoint);
-      const browserContext = this._config.browser.isolated
-        ? await browser.newContext(this._config.browser.contextOptions)
-        : browser.contexts()[0];
-      this.browserContext = browserContext;
-      if (ContextClass) {
-        this._context = new ContextClass(browserContext, {
-          config: this._config,
-          sessionLog: this._sessionLog,
-          cwd: this._clientInfo?.cwd,
-        });
-      } else {
-        await originalInit.call(this, this._clientInfo || {});
-      }
-    } catch (e) {
-      console.error("[patchright-mcp] Reconnect failed:", e.message);
-      return result;
-    }
-    return originalCallTool.call(this, name, rawArguments, progress);
-  };
+  // filteredTools() is bound inside coreBundle and can't be wrapped, but it
+  // reads this exported array on every call.
+  tools.browserTools.push(browserQuitTool, browserSetHeadlessTool);
 }
 
 const userDataDir = takeFlag(process.argv, "--auto-launch-chrome");
 const cdpEndpoint =
   readFlag(process.argv, "--cdp-endpoint") || config.defaultCdpEndpoint;
 if (userDataDir) setupLazyChromeLaunch(userDataDir, cdpEndpoint);
-setupSelfHealingBackend();
-setupBrowserQuitTool();
+setupCustomTools();
 
 if (process.argv.includes("install-browser")) {
   const argv = process.argv.map((arg) =>
     arg === "install-browser" ? "install" : arg,
   );
-  require("patchright-core/lib/cli/program");
+  libCli.decorateProgram(program);
   void program.parseAsync(argv);
   return;
 }
 
-const { decorateMCPCommand } = require("patchright-core/lib/tools/mcp/program");
 const packageJSON = require("./package.json");
 const p = program
   .version("Version " + packageJSON.version)
   .name("Patchright MCP");
-decorateMCPCommand(p, packageJSON.version);
+tools.decorateMCPCommand(p, packageJSON.version);
 void program.parseAsync(process.argv);

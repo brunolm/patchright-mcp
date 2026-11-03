@@ -15,5 +15,5 @@
  * limitations under the License.
  */
 
-const { createConnection } = require('patchright-core/lib/tools/exports');
-module.exports = { createConnection };
+const { tools } = require('patchright-core/lib/coreBundle');
+module.exports = { createConnection: tools.createConnection };

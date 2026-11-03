@@ -20,8 +20,7 @@ const fs = require('fs')
 const path = require('path')
 const { execSync } = require('child_process');
 
-const { browserTools } = require('patchright-core/lib/tools/exports');
-const tools = { browserTools };
+const { tools } = require('patchright-core/lib/coreBundle');
 
 const capabilities = /** @type {Record<string, string>} */ ({
   'core-navigation': 'Core automation',
@@ -142,6 +141,20 @@ async function updateTools(content) {
 }
 
 /**
+ * @param {string} prefix
+ * @returns {string}
+ */
+function optionEnvName(prefix) {
+  if (prefix === 'secrets')
+    return 'PLAYWRIGHT_MCP_SECRETS_FILE';
+  if (prefix === 'cdp-header')
+    return 'PLAYWRIGHT_MCP_CDP_HEADERS';
+  if (prefix === 'no-webmcp')
+    return 'PLAYWRIGHT_MCP_WEBMCP=false';
+  return `PLAYWRIGHT_MCP_` + prefix.toUpperCase().replace(/-/g, '_');
+}
+
+/**
  * @param {string} content
  * @returns {Promise<string>}
  */
@@ -178,7 +191,7 @@ async function updateOptions(content) {
   table.push(`|--------|-------------|`);
   for (const option of options) {
     const prefix = option.name.split(' ')[0];
-    const envName = `PLAYWRIGHT_MCP_` + prefix.toUpperCase().replace(/-/g, '_');
+    const envName = optionEnvName(prefix);
     table.push(`| --${option.name} | ${option.value}<br>*env* \`${envName}\` |`);
   }
 
@@ -188,7 +201,7 @@ async function updateOptions(content) {
     envTable.push(`|-------------|`);
     for (const option of options) {
       const prefix = option.name.split(' ')[0];
-      const envName = `PLAYWRIGHT_MCP_` + prefix.toUpperCase().replace(/-/g, '_');
+      const envName = optionEnvName(prefix);
       envTable.push(`| \`${envName}\` ${option.value} |`);
     }
     console.log(envTable.join('\n'));

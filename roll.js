@@ -2,20 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-function copyConfig() {
-  const src = path.join(__dirname, 'node_modules', 'patchright-core', 'lib', 'tools', 'mcp', 'config.d.ts');
-  const dst = path.join(__dirname, 'config.d.ts');
-  let content = fs.readFileSync(src, 'utf-8');
-  content = content.replace(
-    "import type * as playwright from 'playwright-core';",
-    "import type * as playwright from 'patchright';"
-  );
-  content = content.replace(
-    "import type * as playwright from 'playwright';",
-    "import type * as playwright from 'patchright';"
-  );
-  fs.writeFileSync(dst, content);
-  console.log(`Copied config.d.ts from ${src} to ${dst}`);
+async function doRoll(version) {
+  updatePatchrightVersion(version);
+  await copyConfig(version);
+  // update readme
+  execSync('npm run lint', { cwd: __dirname, stdio: 'inherit' });
 }
 
 function updatePatchrightVersion(version) {
@@ -38,16 +29,31 @@ function updatePatchrightVersion(version) {
   execSync('npm install', { cwd: __dirname, stdio: 'inherit' });
 }
 
-function doRoll(version) {
-  updatePatchrightVersion(version);
-  copyConfig();
-  // update readme
-  execSync('npm run lint', { cwd: __dirname, stdio: 'inherit' });
+// patchright-core no longer ships config.d.ts, and patchright's patch numbers
+// diverge from Playwright's, so the source is the matching release branch.
+async function copyConfig(version) {
+  const [major, minor] = version.split('.');
+  const src = `https://raw.githubusercontent.com/microsoft/playwright/release-${major}.${minor}/packages/playwright-core/src/tools/mcp/config.d.ts`;
+  const dst = path.join(__dirname, 'config.d.ts');
+  const res = await fetch(src);
+  if (!res.ok)
+    throw new Error(`Failed to download ${src}: ${res.status} ${res.statusText}`);
+  let content = await res.text();
+  content = content.replace(
+    /^import type \* as playwright from '[^']+';$/m,
+    "import type * as playwright from 'patchright';"
+  );
+  fs.writeFileSync(dst, content);
+  console.log(`Copied config.d.ts from ${src} to ${dst}`);
 }
 
-let version = process.argv[2];
-if (!version) {
-  version = execSync('npm info patchright version', { encoding: 'utf-8' }).trim();
-  console.log(`Using latest patchright version: ${version}`);
+async function main() {
+  let version = process.argv[2];
+  if (!version) {
+    version = execSync('npm info patchright version', { encoding: 'utf-8' }).trim();
+    console.log(`Using latest patchright version: ${version}`);
+  }
+  await doRoll(version);
 }
-doRoll(version);
+
+void main();
