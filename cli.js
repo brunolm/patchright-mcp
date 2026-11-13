@@ -20,6 +20,7 @@ const { spawn } = require("child_process");
 const { program, z } = require("patchright-core/lib/utilsBundle");
 const { tools, libCli } = require("patchright-core/lib/coreBundle");
 const config = require("./config");
+const { solveCaptcha } = require("./captcha");
 
 function takeFlag(argv, name) {
   const idx = argv.findIndex((a) => a === name || a.startsWith(name + "="));
@@ -190,9 +191,70 @@ function setupCustomTools() {
     },
   };
 
+  const browserSolveCaptchaTool = {
+    capability: "core",
+    schema: {
+      name: "browser_solve_captcha",
+      title: "Solve captcha",
+      description:
+        "Detect a captcha on the current page and solve it. Cloudflare Turnstile, reCAPTCHA, and hCaptcha checkboxes are clicked automatically. Image challenges are sent to the Claude CLI, which replies with the squares to click. The same solver also runs on its own after navigation and other page actions unless PATCHRIGHT_CAPTCHA_AUTO=0.",
+      inputSchema: z.object({}),
+      type: "action",
+    },
+    handle: async (context, params, response) => {
+      const tab = await context.ensureTab();
+      const result = await solveCaptcha(tab.page, config.captcha);
+      response.addTextResult(result.action || "No captcha found.");
+      response.setIncludeSnapshot();
+    },
+  };
+
   // filteredTools() is bound inside coreBundle and can't be wrapped, but it
   // reads this exported array on every call.
-  tools.browserTools.push(browserQuitTool, browserSetHeadlessTool);
+  tools.browserTools.push(
+    browserQuitTool,
+    browserSetHeadlessTool,
+    browserSolveCaptchaTool,
+  );
+  if (config.captcha.auto) wrapAutoSolve();
+}
+
+// Reads and scripts stay fast. The solver runs after a navigation or an input
+// that can land on a challenge, and from browser_solve_captcha directly.
+const AUTO_SOLVE_TOOLS = new Set([
+  "browser_click",
+  "browser_drag",
+  "browser_drop",
+  "browser_file_upload",
+  "browser_fill_form",
+  "browser_hover",
+  "browser_mouse_click_xy",
+  "browser_mouse_drag_xy",
+  "browser_navigate",
+  "browser_navigate_back",
+  "browser_press_key",
+  "browser_select_option",
+  "browser_type",
+  "browser_wait_for",
+]);
+
+function wrapAutoSolve() {
+  for (const tool of tools.browserTools) {
+    if (!AUTO_SOLVE_TOOLS.has(tool.schema.name)) continue;
+    const original = tool.handle;
+    tool.handle = async (context, params, response, signal) => {
+      await original.call(tool, context, params, response, signal);
+      const page = context.currentTab?.()?.page;
+      if (!page || page.isClosed()) return;
+      try {
+        const result = await solveCaptcha(page, config.captcha);
+        if (result.action) response.addTextResult(result.action);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        response.addTextResult(`Captcha solver failed: ${message}`);
+      }
+    };
+  }
 }
 
 const userDataDir = takeFlag(process.argv, "--auto-launch-chrome");

@@ -3,7 +3,7 @@
 This is a fork of `microsoft/playwright-mcp` that runs on Patchright instead of Playwright. The MCP
 server source lives in `microsoft/playwright`, in `packages/playwright-core/src/tools/`; `cli.js` and
 `index.js` run it from the stable `patchright-core` release that `package.json` pins, and `cli.js`
-adds the lazy Chrome launch (`--auto-launch-chrome`) and the `browser_quit` / `browser_set_headless`
+adds the lazy Chrome launch (`--auto-launch-chrome`), captcha solving (`captcha.js`, automatic after page actions, plus `browser_solve_captcha`), and the `browser_quit` / `browser_set_headless`
 tools on top. `config.d.ts` is a copy of the upstream file, and `npm run lint` generates the tool list
 in `README.md`.
 

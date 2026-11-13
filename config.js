@@ -25,6 +25,19 @@ module.exports = {
   // Total time (ms) we wait for the CDP endpoint to go away after closing Chrome.
   chromeShutdownTimeoutMs: 10000,
 
+  // Captcha solving. Checkbox widgets are clicked in-page. Image grids are
+  // sent to the Claude CLI (`claude`, or PATCHRIGHT_CAPTCHA_CLAUDE). Set
+  // PATCHRIGHT_CAPTCHA_AUTO=0 to stop solving after other browser tools;
+  // browser_solve_captcha still works.
+  captcha: {
+    auto: process.env.PATCHRIGHT_CAPTCHA_AUTO !== '0',
+    solveTimeoutMs: 12000,
+    appearTimeoutMs: 8000,
+    interstitialTimeoutMs: 30000,
+    maxAttempts: 2,
+    holdMs: 4000,
+  },
+
   // Default browser launch options. `headless` is mutated at runtime by the
   // browser_set_headless tool. `args` is the list of command-line flags
   // appended to every Chrome launch.
