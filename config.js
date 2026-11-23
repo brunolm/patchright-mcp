@@ -25,12 +25,10 @@ module.exports = {
   // Total time (ms) we wait for the CDP endpoint to go away after closing Chrome.
   chromeShutdownTimeoutMs: 10000,
 
-  // Captcha solving. Checkbox widgets are clicked in-page. Image grids are
-  // sent to the Claude CLI (`claude`, or PATCHRIGHT_CAPTCHA_CLAUDE). Set
-  // PATCHRIGHT_CAPTCHA_AUTO=0 to stop solving after other browser tools;
-  // browser_solve_captcha still works.
+  // Captcha solving, off until browser_solve_captcha picks the types to solve.
+  // Checkbox widgets are clicked in-page. Image grids are sent to the Grok CLI
+  // (`grok`, or PATCHRIGHT_CAPTCHA_GROK).
   captcha: {
-    auto: process.env.PATCHRIGHT_CAPTCHA_AUTO !== '0',
     solveTimeoutMs: 12000,
     appearTimeoutMs: 8000,
     interstitialTimeoutMs: 30000,

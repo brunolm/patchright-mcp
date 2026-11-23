@@ -3,6 +3,9 @@ import { createRequire } from 'node:module';
 
 import { test, expect } from './fixtures';
 
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import type { TestServer } from './testserver/index';
+
 const { parseSquares } = createRequire(path.join(__dirname, 'captcha.spec.ts'))('../captcha.js');
 
 test('parseSquares reads a line of row,col pairs', () => {
@@ -20,27 +23,8 @@ test('parseSquares reads a line of row,col pairs', () => {
 });
 
 test('solves a turnstile checkbox while navigating', async ({ client, server }) => {
-  server.setContent('/cf-frame', `
-    <style>body { margin: 0; }</style>
-    <script>
-      document.addEventListener('click', (event) => {
-        if (event.clientX >= 80) {
-          parent.document.title = 'Missed ' + event.clientX + ',' + event.clientY;
-          return;
-        }
-        parent.document.title = 'Home';
-        parent.document.getElementById('done').hidden = false;
-        parent.document.getElementById('gate').remove();
-      });
-    </script>
-  `, 'text/html');
-  server.setContent('/', `
-    <title>Just a moment...</title>
-    <div id="gate">
-      <iframe title="Widget containing a Cloudflare security challenge" src="/cf-frame" style="width:300px;height:65px;border:0"></iframe>
-    </div>
-    <p id="done" hidden>Welcome</p>
-  `, 'text/html');
+  serveTurnstileGate(server);
+  await chooseCaptchaTypes(client, ['cloudflare']);
 
   expect(await client.callTool({
     name: 'browser_navigate',
@@ -51,11 +35,76 @@ test('solves a turnstile checkbox while navigating', async ({ client, server }) 
   });
 });
 
+test('solves nothing until captcha types are chosen', async ({ client, server }) => {
+  serveTurnstileGate(server);
+
+  const navigated = await client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.PREFIX },
+  });
+  expect(navigated.content[0].text).not.toContain('Solved');
+  expect(navigated.content[0].text).not.toContain('Welcome');
+
+  expect(await client.callTool({
+    name: 'browser_solve_captcha',
+    arguments: {},
+  })).toHaveResponse({
+    result: expect.stringContaining('Captcha solving is off.'),
+  });
+});
+
+test('solves only the chosen captcha types and keeps the last choice', async ({ client, server }) => {
+  serveTurnstileGate(server);
+  await chooseCaptchaTypes(client, ['recaptcha']);
+
+  const navigated = await client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.PREFIX },
+  });
+  expect(navigated.content[0].text).not.toContain('Solved');
+  expect(navigated.content[0].text).not.toContain('Welcome');
+
+  expect(await client.callTool({
+    name: 'browser_solve_captcha',
+    arguments: { types: ['cloudflare'] },
+  })).toHaveResponse({
+    result: expect.stringContaining('Solving captchas: cloudflare. Solved turnstile captcha.'),
+    snapshot: expect.stringContaining('Welcome'),
+  });
+
+  expect(await client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.PREFIX },
+  })).toHaveResponse({
+    result: expect.stringContaining('Solved turnstile captcha.'),
+    snapshot: expect.stringContaining('Welcome'),
+  });
+});
+
+test('an empty captcha type list turns solving off', async ({ client, server }) => {
+  serveTurnstileGate(server);
+  await chooseCaptchaTypes(client, ['all']);
+
+  expect(await client.callTool({
+    name: 'browser_solve_captcha',
+    arguments: { types: [] },
+  })).toHaveResponse({
+    result: expect.stringContaining('Captcha solving is off.'),
+  });
+
+  const navigated = await client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.PREFIX },
+  });
+  expect(navigated.content[0].text).not.toContain('Solved');
+});
+
 test('does not click an ordinary checkbox', async ({ client, server }) => {
   server.setContent('/', `
     <title>Form</title>
     <label><input type="checkbox"> Subscribe</label>
   `, 'text/html');
+  await chooseCaptchaTypes(client, ['all']);
 
   expect(await client.callTool({
     name: 'browser_navigate',
@@ -88,6 +137,7 @@ test('holds a human-check button until it clears', async ({ client, server }) =>
       });
     </script>
   `, 'text/html');
+  await chooseCaptchaTypes(client, ['press-and-hold']);
 
   expect(await client.callTool({
     name: 'browser_navigate',
@@ -139,7 +189,8 @@ test('follows a checkbox click into the image challenge', async ({ startClient, 
     <p id="done" hidden>Welcome</p>
   `, 'text/html');
 
-  const { client } = await startClient({ env: { PATCHRIGHT_CAPTCHA_CLAUDE_REPLY: '2,2' } });
+  const { client } = await startClient({ env: { PATCHRIGHT_CAPTCHA_GROK_REPLY: '2,2' } });
+  await chooseCaptchaTypes(client, ['recaptcha']);
   expect(await client.callTool({
     name: 'browser_navigate',
     arguments: { url: server.PREFIX },
@@ -160,6 +211,7 @@ test('ignores an empty recaptcha frame', async ({ client, server }) => {
     <iframe title="recaptcha challenge" src="/recaptcha/api2/bframe" style="width:300px;height:150px;border:0"></iframe>
     <p>Ready</p>
   `, 'text/html');
+  await chooseCaptchaTypes(client, ['recaptcha']);
 
   const response = await client.callTool({
     name: 'browser_navigate',
@@ -168,7 +220,7 @@ test('ignores an empty recaptcha frame', async ({ client, server }) => {
   const text = response.content[0].text;
   expect(text).toContain('Ready');
   expect(text).not.toContain('image');
-  expect(text).not.toContain('Claude');
+  expect(text).not.toContain('Grok');
 });
 
 test('browser_evaluate does not click a captcha', async ({ startClient, server }) => {
@@ -192,6 +244,7 @@ test('browser_evaluate does not click a captcha', async ({ startClient, server }
   `, 'text/html');
 
   const { client } = await startClient();
+  await chooseCaptchaTypes(client, ['all']);
   await client.callTool({
     name: 'browser_run_code_unsafe',
     arguments: {
@@ -233,6 +286,7 @@ test('waits for a recaptcha checkbox injected after load', async ({ client, serv
       }, 600);
     </script>
   `, 'text/html');
+  await chooseCaptchaTypes(client, ['recaptcha']);
 
   expect(await client.callTool({
     name: 'browser_navigate',
@@ -270,6 +324,7 @@ test('waits out a turnstile reload before calling it solved', async ({ client, s
       });
     </script>
   `, 'text/html');
+  await chooseCaptchaTypes(client, ['cloudflare']);
 
   expect(await client.callTool({
     name: 'browser_navigate',
@@ -288,6 +343,7 @@ test('leaves a solved turnstile token alone', async ({ client, server }) => {
     <input name="cf-turnstile-response" value="token">
     <p>Ready</p>
   `, 'text/html');
+  await chooseCaptchaTypes(client, ['cloudflare']);
 
   const response = await client.callTool({
     name: 'browser_navigate',
@@ -308,9 +364,37 @@ test('browser_solve_captcha reports a page with no captcha', async ({ client, se
 
   expect(await client.callTool({
     name: 'browser_solve_captcha',
-    arguments: {},
+    arguments: { types: ['all'] },
   })).toHaveResponse({
     result: expect.stringContaining('No captcha found.'),
     snapshot: expect.stringContaining('Hello, world!'),
   });
 });
+
+function serveTurnstileGate(server: TestServer) {
+  server.setContent('/cf-frame', `
+    <style>body { margin: 0; }</style>
+    <script>
+      document.addEventListener('click', (event) => {
+        if (event.clientX >= 80) {
+          parent.document.title = 'Missed ' + event.clientX + ',' + event.clientY;
+          return;
+        }
+        parent.document.title = 'Home';
+        parent.document.getElementById('done').hidden = false;
+        parent.document.getElementById('gate').remove();
+      });
+    </script>
+  `, 'text/html');
+  server.setContent('/', `
+    <title>Just a moment...</title>
+    <div id="gate">
+      <iframe title="Widget containing a Cloudflare security challenge" src="/cf-frame" style="width:300px;height:65px;border:0"></iframe>
+    </div>
+    <p id="done" hidden>Welcome</p>
+  `, 'text/html');
+}
+
+async function chooseCaptchaTypes(client: Client, types: string[]) {
+  await client.callTool({ name: 'browser_solve_captcha', arguments: { types } });
+}

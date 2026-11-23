@@ -20,7 +20,15 @@ const { spawn } = require("child_process");
 const { program, z } = require("patchright-core/lib/utilsBundle");
 const { tools, libCli } = require("patchright-core/lib/coreBundle");
 const config = require("./config");
-const { solveCaptcha } = require("./captcha");
+const {
+  CAPTCHA_TYPES,
+  resolveCaptchaTypes,
+  solveCaptcha,
+} = require("./captcha");
+
+// Captcha types the user asked to solve. Empty until browser_solve_captcha
+// sets it, and kept for the life of this server process, which is one session.
+let captchaTypes = [];
 
 function takeFlag(argv, name) {
   const idx = argv.findIndex((a) => a === name || a.startsWith(name + "="));
@@ -197,14 +205,32 @@ function setupCustomTools() {
       name: "browser_solve_captcha",
       title: "Solve captcha",
       description:
-        "Detect a captcha on the current page and solve it. Cloudflare Turnstile, reCAPTCHA, and hCaptcha checkboxes are clicked automatically. Image challenges are sent to the Claude CLI, which replies with the squares to click. The same solver also runs on its own after navigation and other page actions unless PATCHRIGHT_CAPTCHA_AUTO=0.",
-      inputSchema: z.object({}),
+        "Choose which captcha types to solve, then solve any matching captcha on the current page. Captchas are never solved until this is called. Call it only when the user explicitly asks to solve captchas, and pass only the types they named: 'cloudflare' is Turnstile and the 'Just a moment' page, 'press-and-hold' is a hold-to-confirm human check, and 'all' is only for when the user says all or any captcha. The choice lasts for the rest of the session, and the solver also runs on its own after navigation and other page actions, so later requests need no new call unless the user changes the types. Omit types to reuse the current choice; pass [] to stop solving. Checkboxes are clicked; image challenges are sent to the Grok CLI, which replies with the squares to click.",
+      inputSchema: z.object({
+        types: z
+          .array(z.enum([...CAPTCHA_TYPES, "all"]))
+          .optional()
+          .describe(
+            "Captcha types the user asked to solve. Omit to keep the current choice.",
+          ),
+      }),
       type: "action",
     },
     handle: async (context, params, response) => {
+      if (params.types) captchaTypes = resolveCaptchaTypes(params.types);
+      if (!captchaTypes.length) {
+        response.addTextResult(
+          params.types
+            ? "Captcha solving is off."
+            : "Captcha solving is off. Pass the captcha types the user asked to solve.",
+        );
+        return;
+      }
       const tab = await context.ensureTab();
-      const result = await solveCaptcha(tab.page, config.captcha);
-      response.addTextResult(result.action || "No captcha found.");
+      const result = await solveCaptcha(tab.page, captchaSettings());
+      response.addTextResult(
+        `Solving captchas: ${captchaTypes.join(", ")}. ${result.action || "No captcha found."}`,
+      );
       response.setIncludeSnapshot();
     },
   };
@@ -216,7 +242,11 @@ function setupCustomTools() {
     browserSetHeadlessTool,
     browserSolveCaptchaTool,
   );
-  if (config.captcha.auto) wrapAutoSolve();
+  wrapAutoSolve();
+}
+
+function captchaSettings() {
+  return { ...config.captcha, types: captchaTypes };
 }
 
 // Reads and scripts stay fast. The solver runs after a navigation or an input
@@ -244,10 +274,11 @@ function wrapAutoSolve() {
     const original = tool.handle;
     tool.handle = async (context, params, response, signal) => {
       await original.call(tool, context, params, response, signal);
+      if (!captchaTypes.length) return;
       const page = context.currentTab?.()?.page;
       if (!page || page.isClosed()) return;
       try {
-        const result = await solveCaptcha(page, config.captcha);
+        const result = await solveCaptcha(page, captchaSettings());
         if (result.action) response.addTextResult(result.action);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

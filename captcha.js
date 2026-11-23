@@ -4,21 +4,28 @@
  * Checkbox widgets (Cloudflare Turnstile, reCAPTCHA, hCaptcha) are clicked
  * in-page. Turnstile keeps its checkbox in a closed shadow root, so when no
  * selector matches we click the left side of the widget iframe. Image grids
- * are sent to the Claude CLI, which answers with the squares to click.
+ * are sent to the Grok CLI, which answers with the squares to click.
  */
 
 const { spawn } = require('child_process');
+const fs = require('fs/promises');
 const os = require('os');
+const path = require('path');
 
-const CLAUDE_PROMPT = 'Which squares? Reply with only 1-based row,col pairs separated by spaces. Example: 2,2 3,1. If none, reply none.';
+const CAPTCHA_FILE = 'captcha.png';
+const GROK_PROMPT = `Read the image ${CAPTCHA_FILE}. Which squares? Reply with only 1-based row,col pairs separated by spaces. Example: 2,2 3,1. If none, reply none.`;
+
+const CAPTCHA_TYPES = ['cloudflare', 'recaptcha', 'hcaptcha', 'press-and-hold'];
 
 const IMAGE_WIDGETS = [
   {
     id: 'recaptcha image',
+    type: 'recaptcha',
     matches: ({ url, src }) => /\/recaptcha\/(?:api2|enterprise)\/bframe/i.test(`${url} ${src}`),
   },
   {
     id: 'hcaptcha image',
+    type: 'hcaptcha',
     matches: ({ url, src }) => /hcaptcha\.com/i.test(`${url} ${src}`) && /frame=challenge/i.test(`${url} ${src}`),
   },
 ];
@@ -26,6 +33,7 @@ const IMAGE_WIDGETS = [
 const CHECKBOX_WIDGETS = [
   {
     id: 'turnstile',
+    type: 'cloudflare',
     matches: ({ url, src, title }) =>
       /challenges\.cloudflare\.com/i.test(`${url} ${src}`) ||
       /cloudflare security challenge/i.test(title),
@@ -37,11 +45,13 @@ const CHECKBOX_WIDGETS = [
   },
   {
     id: 'recaptcha',
+    type: 'recaptcha',
     matches: ({ url, src }) => /\/recaptcha\/(?:api2|enterprise)\/anchor/i.test(`${url} ${src}`),
     selectors: ['#recaptcha-anchor'],
   },
   {
     id: 'hcaptcha',
+    type: 'hcaptcha',
     matches: ({ url, src, title }) => {
       const haystack = `${url} ${src} ${title}`;
       return /hcaptcha/i.test(haystack) && !/frame=challenge/i.test(haystack);
@@ -51,6 +61,7 @@ const CHECKBOX_WIDGETS = [
 ];
 
 const DEFAULTS = {
+  types: [],
   solveTimeoutMs: 12000,
   appearTimeoutMs: 8000,
   interstitialTimeoutMs: 30000,
@@ -58,16 +69,11 @@ const DEFAULTS = {
   holdMs: 4000,
 };
 
-const PENDING_SELECTOR = [
-  '.g-recaptcha',
-  '.h-captcha',
-  '.cf-turnstile',
-  '#cf-turnstile',
-  'iframe[src*="recaptcha"]',
-  'iframe[src*="hcaptcha"]',
-  'iframe[src*="challenges.cloudflare.com"]',
-  'iframe[title*="security challenge" i]',
-].join(', ');
+const PENDING_SELECTORS = {
+  cloudflare: ['.cf-turnstile', '#cf-turnstile', 'iframe[src*="challenges.cloudflare.com"]', 'iframe[title*="security challenge" i]'],
+  recaptcha: ['.g-recaptcha', 'iframe[src*="recaptcha"]'],
+  hcaptcha: ['.h-captcha', 'iframe[src*="hcaptcha"]'],
+};
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -77,19 +83,33 @@ function withDefaults(options) {
   return { ...DEFAULTS, ...options };
 }
 
+/**
+ * Expands the captcha type names the user chose into the types the solver
+ * handles. `all` means every type; unknown names are dropped.
+ */
+function resolveCaptchaTypes(names) {
+  if (names.includes('all')) return [...CAPTCHA_TYPES];
+  return CAPTCHA_TYPES.filter((type) => names.includes(type));
+}
+
+/**
+ * Solves only captchas whose type is listed in `options.types`. With no types
+ * it does nothing.
+ */
 async function solveCaptcha(page, options) {
   const settings = withDefaults(options);
-  if (!page || page.isClosed()) return { action: null };
+  const { types } = settings;
+  if (!types.length || !page || page.isClosed()) return { action: null };
   if (await responseTokenFilled(page)) return { action: null };
 
   const notes = [];
   let pending = null;
   for (let attempt = 0; attempt < settings.maxAttempts; attempt++) {
     if (await responseTokenFilled(page)) break;
-    let widget = await findActionable(page);
+    let widget = await findActionable(page, types);
     if (!widget && attempt === 0) {
-      if (await isInterstitialTitle(page)) {
-        const waited = await waitUntilWidgetOrClear(page, settings.appearTimeoutMs);
+      if (types.includes('cloudflare') && await isInterstitialTitle(page)) {
+        const waited = await waitUntilWidgetOrClear(page, types, settings.appearTimeoutMs);
         if (waited === 'cleared') {
           notes.push('Solved cloudflare interstitial.');
           break;
@@ -99,8 +119,8 @@ async function solveCaptcha(page, options) {
           break;
         }
         widget = waited;
-      } else if (await captchaHostPending(page)) {
-        widget = await waitForActionable(page, settings.appearTimeoutMs);
+      } else if (await captchaHostPending(page, types)) {
+        widget = await waitForActionable(page, types, settings.appearTimeoutMs);
       }
     }
     if (!widget) break;
@@ -119,21 +139,23 @@ async function solveCaptcha(page, options) {
   return { action: notes.length ? notes.join(' ') : null };
 }
 
-async function captchaHostPending(page) {
-  const count = await page.locator(PENDING_SELECTOR).count().catch(() => 0);
+async function captchaHostPending(page, types) {
+  const selector = types.flatMap((type) => PENDING_SELECTORS[type] || []).join(', ');
+  if (!selector) return false;
+  const count = await page.locator(selector).count().catch(() => 0);
   return count > 0;
 }
 
-async function waitForActionable(page, timeoutMs) {
+async function waitForActionable(page, types, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await responseTokenFilled(page)) return null;
-    const widget = await findActionable(page);
+    const widget = await findActionable(page, types);
     if (widget) return widget;
     await sleep(250);
   }
   if (await responseTokenFilled(page)) return null;
-  return findActionable(page);
+  return findActionable(page, types);
 }
 
 async function actOn(page, widget, settings) {
@@ -155,7 +177,7 @@ async function solveCheckbox(page, widget, settings) {
   const timeoutMs = (await isInterstitialTitle(page))
     ? Math.max(settings.solveTimeoutMs, settings.interstitialTimeoutMs)
     : settings.solveTimeoutMs;
-  const outcome = await waitForClear(page, widget, timeoutMs);
+  const outcome = await waitForClear(page, widget, settings.types, timeoutMs);
   if (outcome.image) return solveImage(outcome.image);
   if (outcome.replacement) return { ok: false, retry: true };
   if (!outcome.cleared)
@@ -197,27 +219,27 @@ async function clickCheckbox(widget) {
   return false;
 }
 
-async function waitForClear(page, widget, timeoutMs) {
+async function waitForClear(page, widget, types, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const state = await clearanceState(page, widget);
+    const state = await clearanceState(page, widget, types);
     if (state) return state;
     await sleep(200);
   }
-  return (await clearanceState(page, widget)) || { cleared: false };
+  return (await clearanceState(page, widget, types)) || { cleared: false };
 }
 
 // A reloaded widget is a new attempt, not a pass. An interstitial whose frame
 // disappeared is still in progress until the title leaves the challenge.
-async function clearanceState(page, widget) {
-  const image = await findVisibleImageWidget(page);
+async function clearanceState(page, widget, types) {
+  const image = await findVisibleImageWidget(page, types);
   if (image) return { cleared: false, image };
   if (page.isClosed() || (await responseTokenFilled(page))) return { cleared: true };
   if (!widget.frame.isDetached() && (await checkboxSolved(widget.frame, widget)))
     return { cleared: true };
   if (!widget.frame.isDetached()) return null;
 
-  const next = await findActionable(page);
+  const next = await findActionable(page, types);
   if (next?.image) return { cleared: false, image: next };
   if (next) return { cleared: false, replacement: true };
   if (!(await interstitialSettled(page))) return null;
@@ -239,11 +261,11 @@ async function interstitialSettled(page) {
   return Boolean(again) && !interstitialTitle(again);
 }
 
-async function findVisibleImageWidget(page) {
+async function findVisibleImageWidget(page, types) {
   for (const frame of page.frames()) {
     if (frame === page.mainFrame() || frame.isDetached()) continue;
     const url = frame.url() || '';
-    const widget = IMAGE_WIDGETS.find((item) => item.matches({ url, src: '', title: '' }));
+    const widget = IMAGE_WIDGETS.find((item) => types.includes(item.type) && item.matches({ url, src: '', title: '' }));
     if (!widget) continue;
     const box = await frameBox(frame);
     if (!box || box.height < 20) continue;
@@ -306,7 +328,7 @@ async function solveImage(widget) {
         height: Math.max(1, box.height),
       },
     });
-    const answer = (await askClaude(png)).trim();
+    const answer = (await askGrok(png)).trim();
     if (/^none$/i.test(answer)) {
       await clickVerify(widget.frame);
       await sleep(700);
@@ -314,7 +336,7 @@ async function solveImage(widget) {
     }
     const squares = parseSquares(answer);
     if (!squares.length)
-      return { ok: false, note: `Captcha still present (${widget.id}). Claude returned no squares.` };
+      return { ok: false, note: `Captcha still present (${widget.id}). Grok returned no squares.` };
 
     const before = await tileSignature(widget.frame);
     await clickSquares(widget.frame, squares);
@@ -417,50 +439,44 @@ async function tileColumns(frame, count) {
   return side >= 1 ? side : count;
 }
 
-async function askClaude(png) {
-  if (process.env.PATCHRIGHT_CAPTCHA_CLAUDE_REPLY)
-    return process.env.PATCHRIGHT_CAPTCHA_CLAUDE_REPLY;
-  return runClaude(png);
+// The screenshot goes through a file because inline image blocks
+// (--prompt-json) exceed the Windows command-line limit, and --prompt-file
+// only takes text. Grok opens the file with read_file, which costs a 2nd turn.
+async function askGrok(png) {
+  if (process.env.PATCHRIGHT_CAPTCHA_GROK_REPLY)
+    return process.env.PATCHRIGHT_CAPTCHA_GROK_REPLY;
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'patchright-captcha-'));
+  try {
+    await fs.writeFile(path.join(dir, CAPTCHA_FILE), png);
+    return await runGrok(dir);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
-function runClaude(png) {
-  const command = process.env.PATCHRIGHT_CAPTCHA_CLAUDE || 'claude';
+function runGrok(cwd) {
+  const command = process.env.PATCHRIGHT_CAPTCHA_GROK || 'grok';
   const args = [
-    '--tools', '',
-    '--max-turns', '1',
+    '--tools', 'read_file',
+    '--max-turns', '2',
     '--system-prompt', 'Reply with only the squares.',
-    '-p',
-    '--verbose',
-    '--input-format', 'stream-json',
-    '--output-format', 'stream-json',
+    '--output-format', 'streaming-json',
+    '-p', GROK_PROMPT,
   ];
-  const message = {
-    type: 'user',
-    message: {
-      role: 'user',
-      content: [
-        {
-          type: 'image',
-          source: { type: 'base64', media_type: 'image/png', data: png.toString('base64') },
-        },
-        { type: 'text', text: CLAUDE_PROMPT },
-      ],
-    },
-  };
 
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { windowsHide: true, cwd: os.tmpdir() });
+    const child = spawn(command, args, { windowsHide: true, cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
       child.kill();
-      reject(new Error('Claude solver timed out.'));
+      reject(new Error('Grok solver timed out.'));
     }, 90000);
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.stdin.on('error', () => {});
     child.on('error', (error) => {
       clearTimeout(timer);
       reject(error);
@@ -468,15 +484,17 @@ function runClaude(png) {
     child.on('close', (code) => {
       clearTimeout(timer);
       if (code !== 0)
-        reject(new Error(`Claude solver exited ${code}: ${(stderr || stdout).slice(0, 300)}`));
+        reject(new Error(`Grok solver exited ${code}: ${(stderr || stdout).slice(0, 300)}`));
       else
-        resolve(claudeResultText(stdout));
+        resolve(grokResultText(stdout));
     });
-    child.stdin.end(JSON.stringify(message) + '\n');
   });
 }
 
-function claudeResultText(stdout) {
+// The json output format concatenates every turn's text with no separator, so
+// narration before the read_file call would run into the answer. Keep only the
+// text streamed after the last tool event.
+function grokResultText(stdout) {
   let result = '';
   for (const line of stdout.split(/\r?\n/)) {
     if (!line.trim()) continue;
@@ -486,8 +504,10 @@ function claudeResultText(stdout) {
     } catch {
       continue;
     }
-    if (event.type === 'result' && typeof event.result === 'string')
-      result = event.result;
+    if (event.type === 'tool_call' || event.type === 'tool_call_update')
+      result = '';
+    else if (event.type === 'text' && typeof event.data === 'string')
+      result += event.data;
   }
   return result;
 }
@@ -520,7 +540,7 @@ async function clickVerify(frame) {
 
 
 
-async function findActionable(page) {
+async function findActionable(page, types) {
   const described = [];
   for (const frame of page.frames()) {
     if (frame === page.mainFrame() || frame.isDetached()) continue;
@@ -528,6 +548,7 @@ async function findActionable(page) {
   }
 
   for (const widget of IMAGE_WIDGETS) {
+    if (!types.includes(widget.type)) continue;
     for (const entry of described) {
       if (!widget.matches(entry.meta)) continue;
       const box = await frameBox(entry.frame);
@@ -538,6 +559,7 @@ async function findActionable(page) {
   }
 
   for (const widget of CHECKBOX_WIDGETS) {
+    if (!types.includes(widget.type)) continue;
     for (const entry of described) {
       if (!widget.matches(entry.meta)) continue;
       if (await checkboxSolved(entry.frame, widget)) continue;
@@ -547,6 +569,7 @@ async function findActionable(page) {
     }
   }
 
+  if (!types.includes('press-and-hold')) return null;
   return findPressAndHold(page);
 }
 
@@ -593,11 +616,11 @@ async function isInterstitialTitle(page) {
   return interstitialTitle(title);
 }
 
-async function waitUntilWidgetOrClear(page, timeoutMs) {
+async function waitUntilWidgetOrClear(page, types, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (!(await isInterstitialTitle(page))) return 'cleared';
-    const widget = await findActionable(page);
+    const widget = await findActionable(page, types);
     if (widget) return widget;
     await sleep(250);
   }
@@ -605,6 +628,8 @@ async function waitUntilWidgetOrClear(page, timeoutMs) {
 }
 
 module.exports = {
+  CAPTCHA_TYPES,
+  resolveCaptchaTypes,
   solveCaptcha,
   parseSquares,
 };
