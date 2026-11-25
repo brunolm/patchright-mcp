@@ -4,16 +4,13 @@
  * Checkbox widgets (Cloudflare Turnstile, reCAPTCHA, hCaptcha) are clicked
  * in-page. Turnstile keeps its checkbox in a closed shadow root, so when no
  * selector matches we click the left side of the widget iframe. Image grids
- * are sent to the Grok CLI, which answers with the squares to click.
+ * are solved by a local object detector (captcha-detector.js).
  */
 
-const { spawn } = require('child_process');
-const fs = require('fs/promises');
-const os = require('os');
-const path = require('path');
+const { pickTiles, targetLabels } = require('./captcha-detector');
 
-const CAPTCHA_FILE = 'captcha.png';
-const GROK_PROMPT = `Read the image ${CAPTCHA_FILE}. Which squares? Reply with only 1-based row,col pairs separated by spaces. Example: 2,2 3,1. If none, reply none.`;
+const TILE_SELECTOR = '.rc-imageselect-tile, .task-image';
+const IMAGE_ROUNDS = 10;
 
 const CAPTCHA_TYPES = ['cloudflare', 'recaptcha', 'hcaptcha', 'press-and-hold'];
 
@@ -306,43 +303,40 @@ async function solvePressAndHold(page, widget, holdMs) {
 }
 
 async function solveImage(widget) {
-  for (let round = 0; round < 4; round++) {
+  let unknownTarget = null;
+  for (let round = 0; round < IMAGE_ROUNDS; round++) {
     if (widget.frame.isDetached() || (await responseTokenFilled(widget.frame.page())))
       return { ok: true, note: `Solved ${widget.id} captcha.` };
     if (!(await imageTileCount(widget.frame)))
       return { ok: true };
 
+    await waitForTileSwaps(widget.frame);
     await waitForTiles(widget.frame);
-    const box = await challengeBox(widget.frame) || await frameBox(widget.frame);
-    if (!box)
-      return { ok: true, note: `Solved ${widget.id} captcha.` };
+    const tiles = await tileBoxes(widget.frame);
+    if (!tiles) {
+      await sleep(500);
+      continue;
+    }
 
-    const png = await widget.frame.page().screenshot({
-      type: 'png',
-      animations: 'disabled',
-      timeout: 8000,
-      clip: {
-        x: Math.max(0, box.x),
-        y: Math.max(0, box.y),
-        width: Math.max(1, box.width),
-        height: Math.max(1, box.height),
-      },
-    });
-    const answer = (await askGrok(png)).trim();
-    if (/^none$/i.test(answer)) {
+    const choice = await chooseTiles(widget.frame, tiles);
+    if (choice.unknownTarget) {
+      unknownTarget = choice.unknownTarget;
+      await clickReload(widget.frame);
+      await sleep(1500);
+      continue;
+    }
+    if (!choice.picked.length) {
       await clickVerify(widget.frame);
       await sleep(700);
       continue;
     }
-    const squares = parseSquares(answer);
-    if (!squares.length)
-      return { ok: false, note: `Captcha still present (${widget.id}). Grok returned no squares.` };
 
     const before = await tileSignature(widget.frame);
-    await clickSquares(widget.frame, squares);
+    await clickTiles(widget.frame, choice.picked);
     if (widget.frame.isDetached() || (await responseTokenFilled(widget.frame.page())))
       return { ok: true, note: `Solved ${widget.id} captcha.` };
     await sleep(700);
+    if (await tilesSwapping(widget.frame)) continue;
     const after = await tileSignature(widget.frame);
     if (after && before && after !== before) continue;
     await clickVerify(widget.frame);
@@ -351,17 +345,72 @@ async function solveImage(widget) {
 
   if (widget.frame.isDetached() || !(await frameBox(widget.frame)) || (await responseTokenFilled(widget.frame.page())))
     return { ok: true, note: `Solved ${widget.id} captcha.` };
-  return { ok: false, note: `Captcha still present (${widget.id}).` };
+  const reason = unknownTarget ? ` The detector cannot find "${unknownTarget}".` : '';
+  return { ok: false, note: `Captcha still present (${widget.id}).${reason}` };
 }
 
-async function clickSquares(frame, squares) {
-  const tiles = frame.locator('.rc-imageselect-tile, .task-image');
+/**
+ * Tile boxes in page coordinates, in DOM order, with whether each tile is
+ * already selected. Null when any tile has no layout box.
+ */
+async function tileBoxes(frame) {
+  const tiles = frame.locator(TILE_SELECTOR);
   const count = await tiles.count().catch(() => 0);
-  if (!count) return;
-  const cols = await tileColumns(frame, count);
-  for (const square of squares) {
-    const index = (square.row - 1) * cols + (square.col - 1);
-    if (index < 0 || index >= count) continue;
+  if (!count) return null;
+  const selected = await tiles.evaluateAll((elements) => elements.map((element) =>
+    element.classList.contains('rc-imageselect-tileselected') || element.getAttribute('aria-pressed') === 'true',
+  )).catch(() => []);
+
+  const boxes = [];
+  for (let index = 0; index < count; index++) {
+    const box = await tiles.nth(index).boundingBox().catch(() => null);
+    if (!box) return null;
+    boxes.push({ ...box, selected: Boolean(selected[index]) });
+  }
+  return boxes;
+}
+
+// PATCHRIGHT_CAPTCHA_SQUARES ("row,col row,col") replaces the detector, so
+// tests can drive the click flow without the model.
+async function chooseTiles(frame, tiles) {
+  const columns = await tileColumns(frame, tiles.length);
+  const fixed = process.env.PATCHRIGHT_CAPTCHA_SQUARES;
+  let picked;
+  if (fixed) {
+    picked = parseSquares(fixed).map(({ row, col }) => (row - 1) * columns + (col - 1));
+  } else {
+    const instructions = await instructionText(frame);
+    const labels = targetLabels(instructions);
+    if (!labels) return { unknownTarget: instructions || 'the requested object' };
+    picked = await detectTiles(frame, tiles, columns, labels);
+  }
+  return { picked: picked.filter((index) => tiles[index] && !tiles[index].selected) };
+}
+
+async function instructionText(frame) {
+  const texts = await frame.locator('.rc-imageselect-instructions, .prompt-text').allInnerTexts().catch(() => []);
+  return texts.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+async function detectTiles(frame, tiles, columns, labels) {
+  const left = Math.min(...tiles.map((tile) => tile.x));
+  const top = Math.min(...tiles.map((tile) => tile.y));
+  const right = Math.max(...tiles.map((tile) => tile.x + tile.width));
+  const bottom = Math.max(...tiles.map((tile) => tile.y + tile.height));
+  const png = await frame.page().screenshot({
+    type: 'png',
+    scale: 'css',
+    animations: 'disabled',
+    timeout: 8000,
+    clip: { x: left, y: top, width: right - left, height: bottom - top },
+  });
+  const relative = tiles.map((tile) => ({ x: tile.x - left, y: tile.y - top, width: tile.width, height: tile.height }));
+  return pickTiles(png, relative, columns, labels);
+}
+
+async function clickTiles(frame, indices) {
+  const tiles = frame.locator(TILE_SELECTOR);
+  for (const index of indices) {
     await tiles.nth(index).click({ timeout: 3000 }).catch((error) => {
       if (!isGoneError(error)) throw error;
     });
@@ -370,8 +419,31 @@ async function clickSquares(frame, squares) {
   }
 }
 
+async function clickReload(frame) {
+  const button = frame.locator('#recaptcha-reload-button, .refresh.button').first();
+  if (await button.count().catch(() => 0))
+    await button.click({ timeout: 3000 }).catch(() => {});
+}
+
 async function imageTileCount(frame) {
-  return frame.locator('.rc-imageselect-tile, .task-image').count().catch(() => 0);
+  return frame.locator(TILE_SELECTOR).count().catch(() => 0);
+}
+
+async function waitForTileSwaps(frame) {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    if (!(await tilesSwapping(frame))) return;
+    await sleep(250);
+  }
+}
+
+// reCAPTCHA grids that say "click verify once there are none left" fade a
+// clicked tile out and a new picture in over several seconds. The old src
+// stays until the fade-out ends, so a src comparison alone misses the swap.
+async function tilesSwapping(frame) {
+  return frame.locator(TILE_SELECTOR).evaluateAll((elements) => elements.some((element) =>
+    element.classList.contains('rc-imageselect-dynamic-selected') || Number(getComputedStyle(element).opacity) < 0.95,
+  )).catch(() => false);
 }
 
 async function waitForTiles(frame) {
@@ -383,7 +455,7 @@ async function waitForTiles(frame) {
 }
 
 async function tilesReady(frame) {
-  return frame.locator('.rc-imageselect-tile, .task-image').evaluateAll((elements) => {
+  return frame.locator(TILE_SELECTOR).evaluateAll((elements) => {
     if (!elements.length) return false;
     return elements.every((element) => {
       const image = element.querySelector('img');
@@ -394,41 +466,12 @@ async function tilesReady(frame) {
   }).catch(() => false);
 }
 
-async function challengeBox(frame) {
-  const grid = await tileGridBox(frame);
-  if (!grid) return null;
-  const header = frame.locator('.rc-imageselect-instructions, .rc-imageselect-desc-wrapper, .prompt-text, .challenge-header').first();
-  if (!(await header.count().catch(() => 0))) return grid;
-  const headerBox = await header.boundingBox().catch(() => null);
-  if (!headerBox) return grid;
-  const x = Math.min(headerBox.x, grid.x);
-  const y = Math.min(headerBox.y, grid.y);
-  const right = Math.max(headerBox.x + headerBox.width, grid.x + grid.width);
-  const bottom = Math.max(headerBox.y + headerBox.height, grid.y + grid.height);
-  return { x, y, width: right - x, height: bottom - y };
-}
-
 async function tileSignature(frame) {
-  return frame.locator('.rc-imageselect-tile, .task-image').evaluateAll((elements) => elements.map((element) => {
+  return frame.locator(TILE_SELECTOR).evaluateAll((elements) => elements.map((element) => {
     const image = element.querySelector('img');
     if (image && image.src) return image.src.slice(-48);
     return getComputedStyle(element).backgroundImage.slice(-48);
   }).join('|')).catch(() => '');
-}
-
-async function tileGridBox(frame) {
-  const tiles = frame.locator('.rc-imageselect-tile, .task-image');
-  const count = await tiles.count().catch(() => 0);
-  if (!count) return null;
-  const first = await tiles.first().boundingBox().catch(() => null);
-  const last = await tiles.nth(count - 1).boundingBox().catch(() => null);
-  if (!first || !last) return null;
-  return {
-    x: first.x,
-    y: first.y,
-    width: last.x + last.width - first.x,
-    height: last.y + last.height - first.y,
-  };
 }
 
 async function tileColumns(frame, count) {
@@ -437,79 +480,6 @@ async function tileColumns(frame, count) {
   if (match) return Number(match[1]);
   const side = Math.round(Math.sqrt(count));
   return side >= 1 ? side : count;
-}
-
-// The screenshot goes through a file because inline image blocks
-// (--prompt-json) exceed the Windows command-line limit, and --prompt-file
-// only takes text. Grok opens the file with read_file, which costs a 2nd turn.
-async function askGrok(png) {
-  if (process.env.PATCHRIGHT_CAPTCHA_GROK_REPLY)
-    return process.env.PATCHRIGHT_CAPTCHA_GROK_REPLY;
-
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'patchright-captcha-'));
-  try {
-    await fs.writeFile(path.join(dir, CAPTCHA_FILE), png);
-    return await runGrok(dir);
-  } finally {
-    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-}
-
-function runGrok(cwd) {
-  const command = process.env.PATCHRIGHT_CAPTCHA_GROK || 'grok';
-  const args = [
-    '--tools', 'read_file',
-    '--max-turns', '2',
-    '--system-prompt', 'Reply with only the squares.',
-    '--output-format', 'streaming-json',
-    '-p', GROK_PROMPT,
-  ];
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { windowsHide: true, cwd, stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error('Grok solver timed out.'));
-    }, 90000);
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.on('error', (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code !== 0)
-        reject(new Error(`Grok solver exited ${code}: ${(stderr || stdout).slice(0, 300)}`));
-      else
-        resolve(grokResultText(stdout));
-    });
-  });
-}
-
-// The json output format concatenates every turn's text with no separator, so
-// narration before the read_file call would run into the answer. Keep only the
-// text streamed after the last tool event.
-function grokResultText(stdout) {
-  let result = '';
-  for (const line of stdout.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    let event;
-    try {
-      event = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (event.type === 'tool_call' || event.type === 'tool_call_update')
-      result = '';
-    else if (event.type === 'text' && typeof event.data === 'string')
-      result += event.data;
-  }
-  return result;
 }
 
 function parseSquares(text) {
@@ -537,8 +507,6 @@ async function clickVerify(frame) {
   if (await named.count().catch(() => 0))
     await named.click({ timeout: 3000 }).catch(() => {});
 }
-
-
 
 async function findActionable(page, types) {
   const described = [];

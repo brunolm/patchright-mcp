@@ -26,8 +26,8 @@ module.exports = {
   chromeShutdownTimeoutMs: 10000,
 
   // Captcha solving, off until browser_solve_captcha picks the types to solve.
-  // Checkbox widgets are clicked in-page. Image grids are sent to the Grok CLI
-  // (`grok`, or PATCHRIGHT_CAPTCHA_GROK).
+  // Checkbox widgets are clicked in-page. Image grids are solved by a local
+  // object detector, downloaded on first use to ~/.cache/patchright-mcp.
   captcha: {
     solveTimeoutMs: 12000,
     appearTimeoutMs: 8000,

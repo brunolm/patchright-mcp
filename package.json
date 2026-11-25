@@ -37,8 +37,10 @@
     }
   },
   "dependencies": {
+    "onnxruntime-node": "^1.30.0",
     "patchright": "1.64.3",
-    "patchright-core": "1.64.3"
+    "patchright-core": "1.64.3",
+    "pngjs": "^7.0.0"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.25.2",

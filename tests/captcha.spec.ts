@@ -189,7 +189,7 @@ test('follows a checkbox click into the image challenge', async ({ startClient, 
     <p id="done" hidden>Welcome</p>
   `, 'text/html');
 
-  const { client } = await startClient({ env: { PATCHRIGHT_CAPTCHA_GROK_REPLY: '2,2' } });
+  const { client } = await startClient({ env: { PATCHRIGHT_CAPTCHA_SQUARES: '2,2' } });
   await chooseCaptchaTypes(client, ['recaptcha']);
   expect(await client.callTool({
     name: 'browser_navigate',
@@ -220,7 +220,7 @@ test('ignores an empty recaptcha frame', async ({ client, server }) => {
   const text = response.content[0].text;
   expect(text).toContain('Ready');
   expect(text).not.toContain('image');
-  expect(text).not.toContain('Grok');
+  expect(text).not.toContain('detector');
 });
 
 test('browser_evaluate does not click a captcha', async ({ startClient, server }) => {
