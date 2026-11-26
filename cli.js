@@ -26,9 +26,10 @@ const {
   solveCaptcha,
 } = require("./captcha");
 
-// Captcha types the user asked to solve. Empty until browser_solve_captcha
-// sets it, and kept for the life of this server process, which is one session.
-let captchaTypes = [];
+// Captcha types each client asked to solve, keyed by its tool context. Empty
+// until browser_solve_captcha sets it, so one session's choice never applies to
+// another session sharing this server over HTTP.
+const captchaTypesByContext = new WeakMap();
 
 function takeFlag(argv, name) {
   const idx = argv.findIndex((a) => a === name || a.startsWith(name + "="));
@@ -217,7 +218,9 @@ function setupCustomTools() {
       type: "action",
     },
     handle: async (context, params, response) => {
-      if (params.types) captchaTypes = resolveCaptchaTypes(params.types);
+      if (params.types)
+        captchaTypesByContext.set(context, resolveCaptchaTypes(params.types));
+      const captchaTypes = captchaTypesOf(context);
       if (!captchaTypes.length) {
         response.addTextResult(
           params.types
@@ -227,7 +230,7 @@ function setupCustomTools() {
         return;
       }
       const tab = await context.ensureTab();
-      const result = await solveCaptcha(tab.page, captchaSettings());
+      const result = await solveCaptcha(tab.page, captchaSettings(context));
       response.addTextResult(
         `Solving captchas: ${captchaTypes.join(", ")}. ${result.action || "No captcha found."}`,
       );
@@ -245,8 +248,12 @@ function setupCustomTools() {
   wrapAutoSolve();
 }
 
-function captchaSettings() {
-  return { ...config.captcha, types: captchaTypes };
+function captchaSettings(context) {
+  return { ...config.captcha, types: captchaTypesOf(context) };
+}
+
+function captchaTypesOf(context) {
+  return captchaTypesByContext.get(context) ?? [];
 }
 
 // Reads and scripts stay fast. The solver runs after a navigation or an input
@@ -274,11 +281,11 @@ function wrapAutoSolve() {
     const original = tool.handle;
     tool.handle = async (context, params, response, signal) => {
       await original.call(tool, context, params, response, signal);
-      if (!captchaTypes.length) return;
+      if (!captchaTypesOf(context).length) return;
       const page = context.currentTab?.()?.page;
       if (!page || page.isClosed()) return;
       try {
-        const result = await solveCaptcha(page, captchaSettings());
+        const result = await solveCaptcha(page, captchaSettings(context));
         if (result.action) response.addTextResult(result.action);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
